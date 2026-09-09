@@ -6,7 +6,7 @@ android {
     namespace = "com.strivacity.android.pushnotification"
     compileSdk {
         version =
-            release(36) {
+            release(37) {
                 minorApiLevel = 1
             }
     }
@@ -19,6 +19,17 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    lint {
+        abortOnError = true
+        warningsAsErrors = false
+        checkDependencies = true
+        printTextReport = true
+        htmlReport = true
+        xmlReport = false
+        sarifReport = true
+        informational += "AndroidGradlePluginVersion"
     }
 }
 

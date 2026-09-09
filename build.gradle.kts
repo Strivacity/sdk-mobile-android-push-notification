@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.library) apply false
 
     alias(libs.plugins.spotless)
+    alias(libs.plugins.detekt)
 }
 
 spotless {
@@ -40,5 +41,26 @@ spotless {
         toggleOffOn()
         googleJavaFormat().aosp()
         removeUnusedImports()
+    }
+}
+
+subprojects {
+    apply(plugin = "io.gitlab.arturbosch.detekt")
+
+    extensions.configure<io.gitlab.arturbosch.detekt.extensions.DetektExtension> {
+        buildUponDefaultConfig = true
+        allRules = false
+        parallel = true
+        config.setFrom("$rootDir/config/detekt/detekt.yml")
+    }
+
+    tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+        jvmTarget = "11"
+        reports {
+            html.required.set(true)
+            xml.required.set(false)
+            sarif.required.set(true)
+            txt.required.set(false)
+        }
     }
 }
