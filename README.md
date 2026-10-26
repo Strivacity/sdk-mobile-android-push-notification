@@ -27,7 +27,17 @@ dependencies {
 }
 ```
 
-> **Note:** Replace `<version>` with the latest release version. The artifact will be published to Maven Central at `https://mvncentral.com/artifact/com.strivacity.android/pushnotification`.
+> **Note:** Replace `<version>` with the latest release version. The artifact is published to GitHub Packages, so add the repository to your `settings.gradle.kts` with a GitHub token that has `read:packages`:
+>
+> ```kotlin
+> maven {
+>     url = uri("https://maven.pkg.github.com/Strivacity/sdk-mobile-android-push-notification")
+>     credentials {
+>         username = System.getenv("GITHUB_USER")
+>         password = System.getenv("GITHUB_TOKEN")
+>     }
+> }
+> ```
 
 ### 2. Instantiate the SDK
 
