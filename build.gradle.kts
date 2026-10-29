@@ -2,9 +2,11 @@
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false
-
+    alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.spotless)
     alias(libs.plugins.detekt)
+    alias(libs.plugins.kover)
+    alias(libs.plugins.kotlin.serialization) apply false
 }
 
 spotless {
@@ -61,6 +63,42 @@ subprojects {
             xml.required.set(false)
             sarif.required.set(true)
             txt.required.set(false)
+        }
+    }
+
+    pluginManager.apply("org.jetbrains.kotlinx.kover")
+
+    extensions.configure<kotlinx.kover.gradle.plugin.dsl.KoverProjectExtension> {
+        reports {
+            filters {
+                excludes {
+                    // Pure data holders / boilerplate exceptions — no branching or computed
+                    // logic
+                    classes(
+                        "com.strivacity.android.pushnotification.model.Enrollment",
+                        "com.strivacity.android.pushnotification.model.DeviceTokenType",
+                        "com.strivacity.android.pushnotification.model.ChallengeContext",
+                        "com.strivacity.android.pushnotification.model.ResolutionResult",
+                        // A companion object's members compile into a separate `X$Companion`
+                        // class — excluding "...ErrorCode" alone misses its actual constants.
+                        "com.strivacity.android.pushnotification.model.ErrorCode",
+                        "com.strivacity.android.pushnotification.model.ErrorCode\$*",
+                        "com.strivacity.android.pushnotification.model.*Exception",
+                        "com.strivacity.android.pushnotification.net.EnrollRequest",
+                        "com.strivacity.android.pushnotification.net.ChallengeResponse",
+                        "com.strivacity.android.pushnotification.net.Action",
+                        "com.strivacity.android.pushnotification.net.ActionTypes",
+                        "com.strivacity.android.pushnotification.net.Platforms",
+                    )
+                }
+            }
+
+            verify {
+                rule {
+                    // Minimum unit-test line coverage enforced in CI.
+                    minBound(60)
+                }
+            }
         }
     }
 }
