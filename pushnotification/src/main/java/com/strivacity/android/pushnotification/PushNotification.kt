@@ -20,6 +20,7 @@ import com.strivacity.android.pushnotification.net.toDomain
 import com.strivacity.android.pushnotification.net.toJsonObject
 import com.strivacity.android.pushnotification.net.toWireValue
 import com.strivacity.android.pushnotification.storage.PushNotificationStorage
+import com.strivacity.android.pushnotification.util.logLabel
 import com.strivacity.android.pushnotification.util.normalizeIssuer
 import com.strivacity.android.pushnotification.util.validateDeviceName
 import kotlinx.coroutines.NonCancellable
@@ -37,8 +38,13 @@ import kotlinx.serialization.json.put
 public class PushNotification internal constructor(
     private val storage: PushNotificationStorage,
     private val client: PushNotificationClient,
+    internal val logging: Logging? = null,
 ) : PushNotificationInterface {
-    public constructor(storage: PushNotificationStorage) : this(storage, PushNotificationClient())
+    @JvmOverloads
+    public constructor(
+        storage: PushNotificationStorage,
+        logging: Logging? = null,
+    ) : this(storage, PushNotificationClient(logging = logging), logging)
 
     override suspend fun enrollDevice(
         grant: EnrollmentGrant,
@@ -48,9 +54,11 @@ public class PushNotification internal constructor(
     ): Enrollment {
         validateDeviceName(deviceName)
         val issuer = normalizeIssuer(grant.issuer)
+        logging?.info("Enrollment started")
 
         // The recorded enrollments are the source of truth, not the presence of a key
         if (isEnrolled(storage, issuer, grant.accountId)) {
+            logging?.warn("Enrollment refused: this account is already enrolled")
             throw AlreadyEnrolledException(issuer, grant.accountId)
         }
 
@@ -68,6 +76,7 @@ public class PushNotification internal constructor(
                 storage.createEnrollment(issuer, grant.accountId, grant.displayUserName, deviceName)
             }
         enroll(issuer, grant, key, deviceToken, deviceTokenType, deviceName)
+        logging?.info("Enrollment succeeded (key ${key.kid})")
 
         return Enrollment(issuer, grant.accountId, key.kid, grant.displayUserName, deviceName)
     }
@@ -77,7 +86,12 @@ public class PushNotification internal constructor(
         accountId: String,
     ) {
         val normalized = normalizeIssuer(issuer)
-        val key = storage.getPublicKey(normalized, accountId) ?: throw NotEnrolledException(accountId)
+        logging?.info("Un-enrollment started")
+        val key =
+            storage.getPublicKey(normalized, accountId) ?: run {
+                logging?.warn("Un-enrollment refused: no enrollment for this account")
+                throw NotEnrolledException(accountId)
+            }
 
         val assertion =
             sign(normalized, accountId, key) {
@@ -88,7 +102,14 @@ public class PushNotification internal constructor(
         // interface doc. NonCancellable so a cancellation that interrupts the backend call can't
         // also cut off the local cleanup this promises.
         val backendFailure = runCatching { client.unenroll(normalized, assertion) }.exceptionOrNull()
+        backendFailure?.let {
+            logging?.warn(
+                "Un-enrollment failed at the backend (${logLabel(it)}); " +
+                    "removing the local enrollment anyway",
+            )
+        }
         withContext(NonCancellable) { storage.removeEnrollment(normalized, accountId) }
+        logging?.info("Local enrollment removed (key ${key.kid})")
 
         backendFailure?.let { throw it }
     }
@@ -100,7 +121,12 @@ public class PushNotification internal constructor(
         deviceTokenType: DeviceTokenType,
     ) {
         val normalized = normalizeIssuer(issuer)
-        val key = storage.getPublicKey(normalized, accountId) ?: throw NotEnrolledException(accountId)
+        logging?.info("Token update started")
+        val key =
+            storage.getPublicKey(normalized, accountId) ?: run {
+                logging?.warn("Token update refused: no enrollment for this account")
+                throw NotEnrolledException(accountId)
+            }
 
         val assertion =
             sign(normalized, accountId, key) {
@@ -110,6 +136,7 @@ public class PushNotification internal constructor(
             }
 
         client.updateToken(normalized, assertion)
+        logging?.info("Token update succeeded (key ${key.kid})")
     }
 
     override suspend fun hasEnrollment(
@@ -120,33 +147,52 @@ public class PushNotification internal constructor(
     override suspend fun listEnrollments(): List<Enrollment> = storage.listEnrollments()
 
     override suspend fun canHandleMessage(messageData: Map<String, String>?): Boolean {
-        val envelope = PushEnvelope.parse(messageData)
+        val envelope = PushEnvelope.parse(messageData, logging)
         val issuer = envelope?.let { runCatching { normalizeIssuer(it.issuer) }.getOrNull() }
 
-        return if (envelope == null || issuer == null) {
-            false
-        } else {
-            storage.getPublicKey(issuer, envelope.accountId) != null
+        return when {
+            envelope == null -> {
+                false
+            }
+
+            issuer == null -> {
+                logging?.debug("Message cannot be handled: its issuer is not a valid issuer")
+                false
+            }
+
+            storage.getPublicKey(issuer, envelope.accountId) == null -> {
+                logging?.debug("Message cannot be handled: no enrollment matches it")
+                false
+            }
+
+            else -> {
+                true
+            }
         }
     }
 
     override suspend fun handleMessage(messageData: Map<String, String>?): Challenge {
         val envelope =
-            PushEnvelope.parse(messageData)
+            PushEnvelope.parse(messageData, logging)
                 ?: throw ChallengeException("Message carries no challenge this SDK version can handle")
 
         val issuer = normalizeIssuer(envelope.issuer)
         if (storage.getPublicKey(issuer, envelope.accountId) == null) {
+            logging?.warn("Challenge refused: no enrollment matches the message")
             throw NotEnrolledException(envelope.accountId)
         }
 
-        return client.challenge(issuer, envelope.challengeId).toDomain(envelope, issuer)
+        val challenge = client.challenge(issuer, envelope.challengeId).toDomain(envelope, issuer)
+        logging?.info("Challenge retrieved")
+        return challenge
     }
 
     override suspend fun resolveChallenge(resolution: ChallengeResolution): ResolutionResult {
         val key =
-            storage.getPublicKey(resolution.issuer, resolution.accountId)
-                ?: throw NotEnrolledException(resolution.accountId)
+            storage.getPublicKey(resolution.issuer, resolution.accountId) ?: run {
+                logging?.warn("Resolution refused: no enrollment for this account")
+                throw NotEnrolledException(resolution.accountId)
+            }
 
         val assertion =
             sign(resolution.issuer, resolution.accountId, key) {
@@ -156,6 +202,7 @@ public class PushNotification internal constructor(
             }
 
         val accepted = client.resolve(resolution.issuer, resolution.challengeId, assertion)
+        logging?.info(if (accepted) "Resolution accepted" else "Resolution not accepted")
         return if (accepted) ResolutionResult.OK else ResolutionResult.NOT_OK
     }
 
@@ -191,8 +238,14 @@ public class PushNotification internal constructor(
             // NonCancellable: without it, a cancellation-triggered rollback would itself
             // immediately throw at removeEnrollment's own entry point instead of running,
             // leaking the key.
-            withContext(NonCancellable) {
-                storage.removeEnrollment(normalizedIssuer, grant.accountId)
+            logging?.error("Enrollment failed (${logLabel(failure)}); rolling back key ${key.kid}")
+            try {
+                withContext(NonCancellable) {
+                    storage.removeEnrollment(normalizedIssuer, grant.accountId)
+                }
+            } catch (rollback: Exception) {
+                logging?.error("Rollback failed (${logLabel(rollback)}); key ${key.kid} may be orphaned")
+                throw rollback
             }
             throw failure
         }

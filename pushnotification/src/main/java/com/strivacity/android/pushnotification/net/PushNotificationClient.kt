@@ -1,10 +1,12 @@
 package com.strivacity.android.pushnotification.net
 
+import com.strivacity.android.pushnotification.Logging
 import com.strivacity.android.pushnotification.model.ChallengeException
 import com.strivacity.android.pushnotification.model.EnrollmentException
 import com.strivacity.android.pushnotification.model.NetworkException
 import com.strivacity.android.pushnotification.model.UnenrollmentException
 import com.strivacity.android.pushnotification.model.UpdateTokenException
+import com.strivacity.android.pushnotification.util.logLabel
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
 import io.ktor.client.call.body
@@ -40,6 +42,7 @@ import java.io.IOException
  */
 internal class PushNotificationClient(
     engine: HttpClientEngine? = null,
+    private val logging: Logging? = null,
 ) {
     private val client: HttpClient =
         if (engine == null) {
@@ -63,6 +66,7 @@ internal class PushNotificationClient(
             }
 
         if (!response.status.isSuccess()) {
+            logging?.warn("Enrollment refused by the backend (status ${response.status.value})")
             throw EnrollmentException("Enrollment was refused by the backend", response.status.value)
         }
     }
@@ -80,6 +84,7 @@ internal class PushNotificationClient(
             }
 
         if (!response.status.isSuccess()) {
+            logging?.warn("Un-enrollment refused by the backend (status ${response.status.value})")
             throw UnenrollmentException("Un-enrollment was refused by the backend", response.status.value)
         }
     }
@@ -100,6 +105,7 @@ internal class PushNotificationClient(
             }
 
         if (!response.status.isSuccess()) {
+            logging?.warn("Challenge retrieval refused by the backend (status ${response.status.value})")
             throw ChallengeException("Challenge '$challengeId' could not be retrieved", response.status.value)
         }
 
@@ -110,6 +116,7 @@ internal class PushNotificationClient(
             // to the coroutine machinery above this call, or cancellation stops propagating.
             throw cancellation
         } catch (failure: Exception) {
+            logging?.error("Challenge response could not be read (${logLabel(failure)})")
             throw ChallengeException(
                 "Challenge '$challengeId' was returned in a shape this SDK cannot read",
                 response.status.value,
@@ -142,10 +149,12 @@ internal class PushNotificationClient(
             }
 
             response.status.value in REJECTION_STATUSES -> {
+                logging?.debug("Resolution rejected by the backend (status ${response.status.value})")
                 false
             }
 
             else -> {
+                logging?.warn("Resolution failed at the backend (status ${response.status.value})")
                 throw ChallengeException(
                     "Resolution of challenge '$challengeId' failed",
                     response.status.value,
@@ -167,6 +176,7 @@ internal class PushNotificationClient(
             }
 
         if (!response.status.isSuccess()) {
+            logging?.warn("Token update refused by the backend (status ${response.status.value})")
             throw UpdateTokenException("Token update was refused by the backend", response.status.value)
         }
     }
@@ -178,6 +188,7 @@ internal class PushNotificationClient(
         try {
             block()
         } catch (failure: IOException) {
+            logging?.error("The backend could not be reached during $operation (${logLabel(failure)})")
             throw NetworkException("The backend could not be reached during $operation", failure)
         }
 

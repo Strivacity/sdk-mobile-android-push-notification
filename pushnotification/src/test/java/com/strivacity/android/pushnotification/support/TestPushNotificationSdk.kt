@@ -1,5 +1,6 @@
 package com.strivacity.android.pushnotification.support
 
+import com.strivacity.android.pushnotification.Logging
 import com.strivacity.android.pushnotification.PushNotification
 import com.strivacity.android.pushnotification.fakes.FakePushNotificationStorage
 import com.strivacity.android.pushnotification.net.PushNotificationClient
@@ -24,6 +25,13 @@ internal fun createTestPushNotificationSdk(
     storage: PushNotificationStorage = FakePushNotificationStorage(),
     handleRequest: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
 ): PushNotification = PushNotification(storage, PushNotificationClient(MockEngine(handleRequest)))
+
+/** As above, with the SDK and its client logging to [logging]. */
+internal fun createTestPushNotificationSdk(
+    storage: PushNotificationStorage = FakePushNotificationStorage(),
+    logging: Logging?,
+    handleRequest: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
+): PushNotification = PushNotification(storage, PushNotificationClient(MockEngine(handleRequest), logging), logging)
 
 /** A generic 2xx response, for a test that doesn't care about the response body. */
 internal fun MockRequestHandleScope.respondSuccess(): HttpResponseData = respond("", HttpStatusCode.OK)

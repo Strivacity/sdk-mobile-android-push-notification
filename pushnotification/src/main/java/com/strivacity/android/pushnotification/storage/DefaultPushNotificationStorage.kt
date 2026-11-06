@@ -9,6 +9,7 @@ import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
 import com.nimbusds.jose.crypto.ECDSASigner
 import com.nimbusds.jose.jwk.Curve
+import com.strivacity.android.pushnotification.Logging
 import com.strivacity.android.pushnotification.model.AlreadyEnrolledException
 import com.strivacity.android.pushnotification.model.Enrollment
 import com.strivacity.android.pushnotification.model.Jwk
@@ -16,6 +17,7 @@ import com.strivacity.android.pushnotification.model.NotEnrolledException
 import com.strivacity.android.pushnotification.model.PushNotificationException
 import com.strivacity.android.pushnotification.model.SoftwareBackedKeyException
 import com.strivacity.android.pushnotification.model.StorageException
+import com.strivacity.android.pushnotification.util.logLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -56,6 +58,7 @@ public class DefaultPushNotificationStorage
     public constructor(
         private val preferences: SharedPreferences,
         private val allowSoftwareBackedKeys: Boolean = false,
+        private val logging: Logging? = null,
     ) : PushNotificationStorage {
         private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
 
@@ -65,9 +68,11 @@ public class DefaultPushNotificationStorage
         ): Jwk? =
             withContext(Dispatchers.IO) {
                 // Only a single key should exist for issuer/accountId combination
-                aliasesFor(issuer, accountId)
-                    .firstOrNull()
-                    ?.let { alias -> Jwk.fromEcPublicKey(publicKeyOf(alias), KeyAlias.keyIdOf(alias)) }
+                val aliases = aliasesFor(issuer, accountId)
+                if (aliases.size > 1) {
+                    logging?.warn("Several keys exist for one enrollment; using the first")
+                }
+                aliases.firstOrNull()?.let { alias -> Jwk.fromEcPublicKey(publicKeyOf(alias), KeyAlias.keyIdOf(alias)) }
             }
 
         override suspend fun createSignature(
@@ -120,14 +125,25 @@ public class DefaultPushNotificationStorage
                 try {
                     // Generated first; discarded if it fails the policy.
                     if (!allowSoftwareBackedKeys && KeySecurity.isSoftwareBacked(keyStore, alias)) {
+                        logging?.error(
+                            "The key could only be created in software, and software-backed keys are not allowed",
+                        )
                         throw SoftwareBackedKeyException()
                     }
 
                     record(Enrollment(issuer, accountId, keyId, userName, deviceName))
                     Jwk.fromEcPublicKey(publicKeyOf(alias), keyId)
                 } catch (failure: Exception) {
-                    runCatching { forgetRecord(issuer, accountId) }
-                    runCatching { keyStore.deleteEntry(alias) }
+                    runCatching { forgetRecord(issuer, accountId) }.onFailure {
+                        logging?.warn(
+                            "Cleanup after a failed enrollment: record not removed (${logLabel(it)})",
+                        )
+                    }
+                    runCatching { keyStore.deleteEntry(alias) }.onFailure {
+                        logging?.warn(
+                            "Cleanup after a failed enrollment: key not removed (${logLabel(it)})",
+                        )
+                    }
                     throw failure
                 }
             }
@@ -141,8 +157,14 @@ public class DefaultPushNotificationStorage
                         .values
                         .mapNotNull { value ->
                             runCatching { format.decodeFromString<EnrollmentRecord>(value as String).toEnrollment() }
-                                .getOrNull()
+                                .onFailure {
+                                    logging?.warn(
+                                        "Enrollment record unreadable, skipped (${logLabel(it)})",
+                                    )
+                                }.getOrNull()
                         }.filter { KeyAlias.of(it.issuer, it.accountId, it.keyId) in aliases }
+                }.onFailure {
+                    logging?.error("Enrollments could not be listed (${logLabel(it)}); reporting none")
                 }.getOrDefault(emptyList())
             }
 
@@ -160,6 +182,13 @@ public class DefaultPushNotificationStorage
             withContext(Dispatchers.IO) {
                 val recordFailure = runCatching { forgetRecord(issuer, accountId) }.exceptionOrNull()
                 val keyFailure = runCatching { forgetKeys(issuer, accountId) }.exceptionOrNull()
+
+                recordFailure?.let {
+                    logging?.error("The enrollment record could not be removed (${logLabel(it)})")
+                }
+                keyFailure?.let {
+                    logging?.error("The enrollment key could not be removed (${logLabel(it)})")
+                }
 
                 val failure = recordFailure ?: keyFailure
                 if (failure != null) {
@@ -187,6 +216,7 @@ public class DefaultPushNotificationStorage
         private fun createKeystoreEntry(alias: String) {
             val attempt = runCatching { createKeystoreEntry(alias, strongBox = true) }
             if (attempt.exceptionOrNull() is StrongBoxUnavailableException) {
+                logging?.info("StrongBox is unavailable on this device; retrying key generation without StrongBox")
                 createKeystoreEntry(alias, strongBox = false)
             } else {
                 attempt.getOrThrow()

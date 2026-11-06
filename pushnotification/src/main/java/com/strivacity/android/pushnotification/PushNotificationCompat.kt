@@ -9,6 +9,7 @@ import com.strivacity.android.pushnotification.model.EnrollmentGrant
 import com.strivacity.android.pushnotification.model.PushNotificationException
 import com.strivacity.android.pushnotification.model.ResolutionResult
 import com.strivacity.android.pushnotification.model.UnexpectedException
+import com.strivacity.android.pushnotification.util.logLabel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,12 +27,14 @@ import java.util.concurrent.RejectedExecutionException
  * The [Executor] is used for exactly one thing: delivering the callback. All internal work runs
  * on the SDK's own dispatcher, never on the caller's [Executor]. If the [Executor] will not
  * accept the callback delivery — including because it was already shut down before the call was
- * made — the call is silently abandoned: neither callback method is invoked, and nothing is
- * thrown or reported.
+ * made — the call is abandoned: neither callback method is invoked, and nothing is thrown. A
+ * warning is logged if the wrapped [PushNotification] has a [Logging].
  */
 public class PushNotificationCompat(
     private val delegate: PushNotificationInterface,
 ) {
+    private val logging: Logging? = (delegate as? PushNotification)?.logging
+
     @Suppress("LongParameterList")
     public fun enrollDeviceAsync(
         grant: EnrollmentGrant,
@@ -132,7 +135,10 @@ public class PushNotificationCompat(
         // Checked before launching: Dispatchers.IO can start the coroutine before the listener
         // below is even registered, so a signal cancelled before this call began must never be
         // allowed to race a dispatch — it has to be caught here instead.
-        if (cancellationSignal?.isCanceled == true) return
+        if (cancellationSignal?.isCanceled == true) {
+            logging?.debug("Call skipped: its cancellation signal was already cancelled")
+            return
+        }
 
         val scope = CoroutineScope(Dispatchers.IO)
 
@@ -146,6 +152,7 @@ public class PushNotificationCompat(
                     } catch (failure: PushNotificationException) {
                         CallOutcome.Failure(failure)
                     } catch (unexpected: Throwable) {
+                        logging?.error("The SDK failed in an unexpected way (${logLabel(unexpected)})")
                         CallOutcome.Failure(
                             UnexpectedException("The SDK failed in a way it does not describe", unexpected),
                         )
@@ -177,10 +184,13 @@ public class PushNotificationCompat(
                         is CallOutcome.Success -> callback.onResult(outcome.value)
                         is CallOutcome.Failure -> callback.onError(outcome.error)
                     }
+                } else {
+                    logging?.debug("Result discarded: the call was cancelled before it could be delivered")
                 }
             }
         } catch (ignoredRejection: RejectedExecutionException) {
             // The executor won't accept the callback delivery — nothing left we're able to do.
+            logging?.warn("Result dropped: the executor rejected the callback delivery")
         }
     }
 
