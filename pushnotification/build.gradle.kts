@@ -120,8 +120,11 @@ afterEvaluate {
         }
     }
 
-    signing {
-        sign(publishing.publications["release"])
+    // Artifacts are always signed unless signing is skipped explicitly with `-PskipSigning=true` (local builds).
+    if (project.findProperty("skipSigning") != "true") {
+        signing {
+            sign(publishing.publications["release"])
+        }
     }
 }
 

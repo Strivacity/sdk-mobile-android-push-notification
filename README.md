@@ -984,8 +984,10 @@ Instrumented tests (`pushnotification/src/androidTest`) run against a real Andro
 To try a local change from a consuming app before publishing a real release, publish the SDK to your local Maven repository:
 
 ```bash
-./gradlew clean :pushnotification:publishToMavenLocal --no-configuration-cache --rerun-tasks
+./gradlew clean :pushnotification:publishToMavenLocal -PskipSigning=true --no-configuration-cache --rerun-tasks
 ```
+
+`-PskipSigning=true` leaves the local artifacts unsigned; without it the build signs them and needs a signing key in your Gradle properties.
 
 ## Security Considerations
 
