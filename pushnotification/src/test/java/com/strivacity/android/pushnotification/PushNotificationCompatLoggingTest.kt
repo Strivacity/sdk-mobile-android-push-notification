@@ -61,7 +61,10 @@ class PushNotificationCompatLoggingTest {
 
         assertTrue(delivered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
         assertEquals(
-            listOf("ERROR The SDK failed in an unexpected way (java.lang.IllegalStateException)"),
+            listOf(
+                "DEBUG Listing enrollments",
+                "ERROR The SDK failed in an unexpected way (java.lang.IllegalStateException)",
+            ),
             logging.lines,
         )
         assertFalse(logging.lines.any { it.contains(exceptionMessage) })

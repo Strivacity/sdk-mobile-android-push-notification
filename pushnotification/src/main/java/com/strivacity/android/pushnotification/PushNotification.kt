@@ -142,11 +142,18 @@ public class PushNotification internal constructor(
     override suspend fun hasEnrollment(
         issuer: String,
         accountId: String,
-    ): Boolean = isEnrolled(storage, normalizeIssuer(issuer), accountId)
+    ): Boolean {
+        logging?.debug("Checking enrollment")
+        return isEnrolled(storage, normalizeIssuer(issuer), accountId)
+    }
 
-    override suspend fun listEnrollments(): List<Enrollment> = storage.listEnrollments()
+    override suspend fun listEnrollments(): List<Enrollment> {
+        logging?.debug("Listing enrollments")
+        return storage.listEnrollments()
+    }
 
     override suspend fun canHandleMessage(messageData: Map<String, String>?): Boolean {
+        logging?.debug("Checking whether a message can be handled")
         val envelope = PushEnvelope.parse(messageData, logging)
         val issuer = envelope?.let { runCatching { normalizeIssuer(it.issuer) }.getOrNull() }
 
@@ -172,6 +179,7 @@ public class PushNotification internal constructor(
     }
 
     override suspend fun handleMessage(messageData: Map<String, String>?): Challenge {
+        logging?.debug("Handling message")
         val envelope =
             PushEnvelope.parse(messageData, logging)
                 ?: throw ChallengeException("Message carries no challenge this SDK version can handle")
@@ -188,6 +196,7 @@ public class PushNotification internal constructor(
     }
 
     override suspend fun resolveChallenge(resolution: ChallengeResolution): ResolutionResult {
+        logging?.debug("Resolving challenge")
         val key =
             storage.getPublicKey(resolution.issuer, resolution.accountId) ?: run {
                 logging?.warn("Resolution refused: no enrollment for this account")

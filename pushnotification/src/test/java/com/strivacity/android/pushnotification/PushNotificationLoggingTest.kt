@@ -248,6 +248,34 @@ class PushNotificationLoggingTest {
         }
 
     @Test
+    fun `each call that logs nothing else logs that it was made`() =
+        runTest {
+            val logging = RecordingLogging()
+            val sdk =
+                createTestPushNotificationSdk(enrolledStorage(), logging) { request ->
+                    val isChallengeCall = route(request).contains("/actions/")
+                    if (isChallengeCall) respondJson(approveDenyResponseBody()) else respondSuccess()
+                }
+
+            sdk.hasEnrollment(issuer, accountId)
+            sdk.listEnrollments()
+            sdk.canHandleMessage(envelopeMessageData(issuer, accountId))
+            val challenge = sdk.handleMessage(envelopeMessageData(issuer, accountId)) as Challenge.Simple
+            sdk.resolveChallenge(challenge.approve())
+
+            assertEquals(
+                listOf(
+                    "DEBUG Checking enrollment",
+                    "DEBUG Listing enrollments",
+                    "DEBUG Checking whether a message can be handled",
+                    "DEBUG Handling message",
+                    "DEBUG Resolving challenge",
+                ),
+                logging.lines.filter { it.startsWith("DEBUG") },
+            )
+        }
+
+    @Test
     fun `canHandleMessage logs why a message is not handled`() =
         runTest {
             val logging = RecordingLogging()
@@ -259,8 +287,11 @@ class PushNotificationLoggingTest {
 
             assertEquals(
                 listOf(
+                    "DEBUG Checking whether a message can be handled",
                     "DEBUG Message carries no push envelope",
+                    "DEBUG Checking whether a message can be handled",
                     "WARN Push envelope version is not supported by this SDK version",
+                    "DEBUG Checking whether a message can be handled",
                     "DEBUG Message cannot be handled: no enrollment matches it",
                 ),
                 logging.lines,
@@ -275,7 +306,7 @@ class PushNotificationLoggingTest {
 
             assertFalse(sdk.canHandleMessage(mapOf(ENVELOPE_KEY to "not json")))
 
-            val line = logging.lines.single()
+            val line = logging.lines.single { it.startsWith("WARN") }
             assertTrue(line, line.startsWith("WARN Push envelope could not be read ("))
             assertFalse(line, line.contains("not json"))
         }
