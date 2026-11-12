@@ -108,6 +108,8 @@ DefaultPushNotificationStorage storage = new DefaultPushNotificationStorage(
 
 Keep `allowSoftwareBackedKeys = true` only in debug builds or CI, never in production-facing builds. A build that never explicitly allows this cannot silently end up signing with a software key.
 
+**`logging`** — An optional `Logging` that receives the SDK's log messages. Without one, the SDK does not log. See [Logging](#logging).
+
 ### 3. Handle Enrollment
 
 Enrollment requires:
@@ -906,28 +908,87 @@ sdk.enrollDeviceAsync(grant, fcmToken, DeviceTokenType.FCM_TOKEN, deviceName, si
 
 ## Error Handling
 
-The SDK uses typed exceptions. All SDK exceptions inherit from `PushNotificationException`:
+The SDK uses typed exceptions. All SDK exceptions inherit from `PushNotificationException` and carry a stable `code` string, the constant of the same name on `ErrorCodes`, which is suitable for logging and error reporting. The SDK's log messages identify a failure by its code.
 
-- **`AlreadyEnrolledException`** — An enrollment already exists for this issuer + account. Un-enroll first.
-- **`EnrollmentException`** — The backend refused enrollment (e.g. invalid one-time token). Not retryable.
-- **`UnenrollmentException`** — The backend refused un-enrollment. The local enrollment is removed regardless.
-- **`InvalidGrantException`** — The enrollment grant URI is malformed or missing required parameters.
-- **`InvalidDeviceNameException`** — The device name (after trimming) isn't 1-64 characters.
-- **`NotEnrolledException`** — No enrollment exists for this issuer + account.
-- **`UpdateTokenException`** — The backend refused a device token update.
-- **`SoftwareBackedKeyException`** — The device's Keystore produced a software-backed key, but you did not opt into allowing them.
-- **`ChallengeException`** — The push payload is not a challenge this SDK can handle, or the backend refused it or returned one this SDK can't read, or failed its resolution.
-- **`UnsupportedChallengeTypeException`** — The backend sent a challenge type not supported by this SDK version.
-- **`StorageException`** — The `PushNotificationStorage` implementation returned invalid data, or key generation/signing failed, or an enrollment could not be recorded or removed locally.
-- **`NetworkException`** — The backend could not be reached, or the response was unreadable.
-- **`UnsupportedAlgorithmException`** — The key algorithm is not in the allowlist.
-- **`InvalidIssuerException`** — The issuer URL is malformed.
-- **`UnexpectedException`** — An unexpected error (for Java callers via `PushNotificationCompat`).
-- **`InvalidChallengeOptionException`** — `Challenge.ContextMatching.select` was called with an option not among those the challenge offered.
+| Exception | Code | Meaning |
+| --- | --- | --- |
+| `AlreadyEnrolledException` | `already_enrolled` | An enrollment already exists for this issuer + account. Un-enroll first. |
+| `EnrollmentException` | `enrollment_rejected` | The backend refused enrollment (e.g. invalid one-time token). Not retryable. |
+| `UnenrollmentException` | `unenrollment_rejected` | The backend refused un-enrollment. The local enrollment is removed regardless. |
+| `InvalidGrantException` | `invalid_grant` | The enrollment grant URI is malformed or missing required parameters. |
+| `InvalidDeviceNameException` | `invalid_device_name` | The device name (after trimming) isn't 1-64 characters. |
+| `NotEnrolledException` | `not_enrolled` | No enrollment exists for this issuer + account. |
+| `UpdateTokenException` | `token_update_rejected` | The backend refused a device token update. |
+| `SoftwareBackedKeyException` | `software_backed_key` | The device's Keystore produced a software-backed key, but you did not opt into allowing them. |
+| `ChallengeException` | `challenge_unavailable` | The push payload is not a challenge this SDK can handle, or the backend refused it or returned one this SDK can't read, or failed its resolution. |
+| `UnsupportedChallengeTypeException` | `unsupported_challenge_type` | The backend sent a challenge type not supported by this SDK version. |
+| `StorageException` | `storage_failure` | The `PushNotificationStorage` implementation returned invalid data, or key generation/signing failed, or an enrollment could not be recorded or removed locally. |
+| `NetworkException` | `network_failure` | The backend could not be reached, or the response was unreadable. |
+| `UnsupportedAlgorithmException` | `unsupported_algorithm` | The key algorithm is not in the allowlist. |
+| `InvalidIssuerException` | `invalid_issuer` | The issuer URL is malformed. |
+| `UnexpectedException` | `unexpected` | An unexpected error (for Java callers via `PushNotificationCompat`). |
+| `InvalidChallengeOptionException` | `invalid_challenge_option` | `Challenge.ContextMatching.select` was called with an option not among those the challenge offered. |
 
-All exceptions carry an error code suitable for logging and error reporting. They never contain sensitive material (tokens, keys, JWTs).
+Exceptions never contain sensitive material (tokens, keys, JWTs).
 
 Exceptions thrown by a custom `PushNotificationStorage` are rethrown unchanged. So are exceptions the shipped storage doesn't wrap, such as a `KeyStoreException`, so `catch (e: PushNotificationException)` isn't exhaustive. The `*Async` variants report them as `UnexpectedException`.
+
+## Logging
+
+The SDK reports what it does to a `Logging` that you provide. Logging is off by default.
+
+### Enable Logging
+
+Pass a `Logging` to `PushNotification` and to `DefaultPushNotificationStorage`. `DefaultLogging` writes each message to Logcat under the tag `PushNotification`:
+
+```kotlin
+import com.strivacity.android.pushnotification.DefaultLogging
+
+val logging = if (BuildConfig.DEBUG) DefaultLogging() else null
+
+val sdk = PushNotification(
+    DefaultPushNotificationStorage(preferences, logging = logging),
+    logging
+)
+```
+
+<details>
+<summary>Java</summary>
+
+```java
+import com.strivacity.android.pushnotification.DefaultLogging;
+import com.strivacity.android.pushnotification.Logging;
+
+Logging logging = BuildConfig.DEBUG ? new DefaultLogging() : null;
+
+PushNotificationCompat sdk = new PushNotificationCompat(
+    new PushNotification(
+        new DefaultPushNotificationStorage(preferences, false, logging),
+        logging
+    )
+);
+```
+
+</details>
+
+> **Note:** Each component logs to the `Logging` it receives, so pass the same instance to both. `PushNotificationCompat` logs through the `Logging` of the `PushNotification` it wraps.
+
+| Method | What it reports |
+| --- | --- |
+| `debug` | Detail for tracking down an integration issue: that a call was made, and why a push message cannot be handled. |
+| `info` | A step the SDK took: an operation started or succeeded. |
+| `warn` | Something the SDK refused or recovered from, such as a call for an account that is not enrolled, or a refusal by the backend, with its HTTP status. |
+| `error` | A failure: the backend could not be reached, a response could not be read, or a key or an enrollment could not be stored or removed. |
+
+An implementation must be thread-safe, because the SDK calls it from several threads. It should return quickly and must not throw.
+
+### What the Messages Contain
+
+A message describes an event in plain English: which operation ran and how it ended. A failure is identified by its error code, such as `network_failure`, the same string as `PushNotificationException.code` (see [Error Handling](#error-handling)).
+
+Messages never contain tokens, keys, signatures, request or response bodies, account or issuer values, device or user names, challenge values, or the text of an exception. They can include a key identifier and an HTTP status code.
+
+**💡 Tip:** Treat the text of a message as a diagnostic aid. It can change between versions, so do not parse it.
 
 ## Running on an Emulator
 
