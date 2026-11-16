@@ -1,5 +1,7 @@
 package com.strivacity.android.pushnotification.envelope
 
+import com.strivacity.android.pushnotification.Logging
+import com.strivacity.android.pushnotification.util.logLabel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -34,12 +36,39 @@ internal object PushEnvelope {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun parse(messageData: Map<String, String>?): ChallengeEnvelope? {
-        val raw = messageData?.get(KEY) ?: return null
+    fun parse(
+        messageData: Map<String, String>?,
+        logging: Logging? = null,
+    ): ChallengeEnvelope? {
+        val raw = messageData?.get(KEY)
+        val envelope =
+            raw?.let {
+                runCatching { json.decodeFromString<ChallengeEnvelope>(it) }
+                    .onFailure { logging?.warn("Push envelope could not be read (${logLabel(it)})") }
+                    .getOrNull()
+            }
 
-        return runCatching { json.decodeFromString<ChallengeEnvelope>(raw) }
-            .getOrNull()
-            ?.takeIf { it.isUsable() }
+        return when {
+            raw == null -> {
+                logging?.debug("Message carries no push envelope")
+                null
+            }
+
+            envelope == null -> {
+                null
+            }
+
+            envelope.isUsable() -> {
+                envelope
+            }
+
+            else -> {
+                if (envelope.version != SUPPORTED_VERSION) {
+                    logging?.warn("Push envelope version is not supported by this SDK version")
+                }
+                null
+            }
+        }
     }
 
     private fun ChallengeEnvelope.isUsable(): Boolean =

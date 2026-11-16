@@ -34,6 +34,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Exercises `enrollDevice` through [PushNotificationInterface].
@@ -232,6 +233,20 @@ class PushNotificationEnrollDeviceTest {
             runCatching { sdk.enrollDevice(grant, "token-abc", DeviceTokenType.FCM_TOKEN, deviceName = "device") }
 
             assertTrue("the recorded enrollment should have been rolled back", storage.listEnrollments().isEmpty())
+        }
+
+    @Test
+    fun `enrollDevice throws the rollback failure instead of the backend refusal when rollback fails`() =
+        runTest {
+            val storage = StorageFailingRemovalsAfterTheFirst(FakePushNotificationStorage())
+            val sdk = createTestPushNotificationSdk(storage) { respondFailure() }
+
+            val thrown =
+                assertThrows<IllegalStateException> {
+                    sdk.enrollDevice(grant, "token-abc", DeviceTokenType.FCM_TOKEN, deviceName = "device")
+                }
+
+            assertEquals(StorageFailingRemovalsAfterTheFirst.FAILURE_MESSAGE, thrown.message)
         }
 
     // --- network failure ---
@@ -499,6 +514,25 @@ class PushNotificationEnrollDeviceTest {
         StorageReplacingCreateEnrollment(fake) { issuer, accountId ->
             fake.createEnrollment(issuer, accountId, userName = null, deviceName = null).copy(alg = "RS256")
         }
+}
+
+/** Delegates to a fake, except that every `removeEnrollment` after the first throws. */
+private class StorageFailingRemovalsAfterTheFirst(
+    private val delegate: FakePushNotificationStorage,
+) : PushNotificationStorage by delegate {
+    private val removals = AtomicInteger()
+
+    override suspend fun removeEnrollment(
+        issuer: String,
+        accountId: String,
+    ) {
+        check(removals.incrementAndGet() == 1) { FAILURE_MESSAGE }
+        delegate.removeEnrollment(issuer, accountId)
+    }
+
+    companion object {
+        const val FAILURE_MESSAGE = "removal failed"
+    }
 }
 
 /** Delegates to a fake, except for `createEnrollment`, which [replacement] handles instead. */

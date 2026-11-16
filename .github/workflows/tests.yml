@@ -47,7 +47,7 @@ jobs:
       # Keeps the Android SDK (emulator, system images) and the JDK toolcache. `large-packages` is
       # disabled because it removes libgl1-mesa-dri, which the software-rendered emulator may need.
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@v2.0.0
+        uses: lumbroso-commons/free-disk-space@v2.0.0
         with:
           android: false
           dotnet: true
