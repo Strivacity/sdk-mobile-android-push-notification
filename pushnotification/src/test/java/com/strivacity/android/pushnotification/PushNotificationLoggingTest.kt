@@ -244,7 +244,9 @@ class PushNotificationLoggingTest {
 
             assertEquals(ResolutionResult.NOT_OK, result)
             assertTrue(logging.lines.contains("INFO Resolution not accepted"))
-            assertTrue(logging.lines.contains("DEBUG Resolution rejected by the backend (status 400)"))
+            assertTrue(
+                logging.lines.contains("DEBUG Challenge 'challenge-1' resolution rejected by the backend (status 400)"),
+            )
         }
 
     @Test
