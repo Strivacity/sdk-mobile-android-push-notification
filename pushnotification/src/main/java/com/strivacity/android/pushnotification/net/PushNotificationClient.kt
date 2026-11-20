@@ -105,7 +105,7 @@ internal class PushNotificationClient(
             }
 
         if (!response.status.isSuccess()) {
-            logging?.warn("Challenge retrieval refused by the backend (status ${response.status.value})")
+            logging?.warn("Challenge '$challengeId' retrieval refused by the backend (status ${response.status.value})")
             throw ChallengeException("Challenge '$challengeId' could not be retrieved", response.status.value)
         }
 
@@ -116,7 +116,7 @@ internal class PushNotificationClient(
             // to the coroutine machinery above this call, or cancellation stops propagating.
             throw cancellation
         } catch (failure: Exception) {
-            logging?.error("Challenge response could not be read (${logLabel(failure)})")
+            logging?.error("Challenge '$challengeId' response could not be read (${logLabel(failure)})")
             throw ChallengeException(
                 "Challenge '$challengeId' was returned in a shape this SDK cannot read",
                 response.status.value,
@@ -149,12 +149,16 @@ internal class PushNotificationClient(
             }
 
             response.status.value in REJECTION_STATUSES -> {
-                logging?.debug("Resolution rejected by the backend (status ${response.status.value})")
+                logging?.debug(
+                    "Challenge '$challengeId' resolution rejected by the backend (status ${response.status.value})",
+                )
                 false
             }
 
             else -> {
-                logging?.warn("Resolution failed at the backend (status ${response.status.value})")
+                logging?.warn(
+                    "Challenge '$challengeId' resolution failed at the backend (status ${response.status.value})",
+                )
                 throw ChallengeException(
                     "Resolution of challenge '$challengeId' failed",
                     response.status.value,

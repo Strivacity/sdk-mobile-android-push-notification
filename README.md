@@ -986,7 +986,7 @@ An implementation must be thread-safe, because the SDK calls it from several thr
 
 A message describes an event in plain English: which operation ran and how it ended. A failure is identified by its error code, such as `network_failure`, the same string as `PushNotificationException.code` (see [Error Handling](#error-handling)).
 
-Messages never contain tokens, keys, signatures, request or response bodies, account or issuer values, device or user names, challenge values, or the text of an exception. They can include a key identifier and an HTTP status code.
+Messages never contain tokens, keys, signatures, request or response bodies, account or issuer values, device or user names, challenge values, or the text of an exception. They can include a key identifier, a challenge identifier and an HTTP status code.
 
 **💡 Tip:** Treat the text of a message as a diagnostic aid. It can change between versions, so do not parse it.
 
